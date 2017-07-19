@@ -5,13 +5,21 @@ from stemming.porter2 import stem
 from bs4 import BeautifulSoup as bs
 from time import sleep
 from nltk.corpus import stopwords
+from collections import defaultdict
+
+import os
+from optparse import OptionParser
+parser = OptionParser()
+parser.add_option('-s','--search',dest="searchterm",help="The job descriptions to download from indeed.com",metavar="SEARCH")
+
+(options,args) = parser.parse_args()
 
 def chunk_space(chunk):
     chunk_out = chunk + ' ' # Need to fix spacing issue
     return chunk_out
 
-only_letters = re.compile("[^a-zA-Z0-9]+")
-dataset = {}
+letters = re.compile("[^a-z ]+")
+delimiters = re.compile("[\r\n\\\\]+")
 
 stop_words = set(stopwords.words("english"))
 stop_words.add('ca')
@@ -61,44 +69,82 @@ stop_words.add('palo')
 stop_words.add('alto')
 stop_words.add('hartford')
 stop_words.add('ct')
-for _,_,files in os.walk('raw_pages/'):
-    for filename in files:
-        with open('raw_pages/'+filename,'rb') as bod:
-            soup = bs(bod,'lxml')
-            dataset[filename] = []
-            for rem in soup(["script","style"]):
-                rem.extract()
-            lines = (line.strip() for line in soup.get_text().splitlines())
-            chunks = (phrase.strip() for line in lines for phrase in line.split("  ")) # break
-            text = ''.join(chunk_space(chunk) for chunk in chunks if chunk).encode('utf-8') # Get rid of all blank lines and ends of line
-            
+stop_words.add('co')
+stop_words.add('denver')
+
+import time                                                
+
+def timeme(method):
+    def wrapper(*args, **kw):
+        startTime = int(round(time.time() * 1000))
+        result = method(*args, **kw)
+        endTime = int(round(time.time() * 1000))
+
+        print(endTime - startTime,'ms')
+        return result
+
+    return wrapper
+
+def process_file(dir,filename):
+    with open(dir+'/'+filename,'rb') as bod:
+        soup = bs(bod,'lxml')
+        for rem in soup(["script","style"]):
+            rem.extract()
+        text = letters.sub("",delimiters.sub(" ",soup.get_text(" ").lower()))
+        
+        words = (stem(word) for line in text.splitlines() for word in line.split(" ") if (word and not word in stop_words))
+
+        tempdict = defaultdict(int)
+        previous = None
+        twoback = None
+        for word in words:
+            tempdict[word] += 1
             try:
-                text = text.decode('unicode_escape').encode('ascii', 'ignore')
+                tempdict[previous+' '+word]+=1
+                try:
+                    tempdict[twoback+' '+previous+' '+word]+=1
+                except:
+                    pass
             except:
                 pass
-            
-            text = only_letters.sub(" ", text) # Remove non-letter/numbers
-            text = text.lower().split()
-            text = [stem(w) for w in text if not w in stop_words] # Remove articles, conjunctions, etc. and stems the output
+            twoback = previous
+            previous = word
+    if len(tempdict) > 150: # need at least 50 words to be considered a job description
+        return tempdict
 
-            tempdict = {}
-            def add_to_dict(word):
-                if word in tempdict:
-                    tempdict[word] += 1
-                else:
-                    tempdict[word] = 1
-            previous = ''
-            twoback = ''
-            for t in text:
-                add_to_dict(t)
-                if not previous == '':
-                    add_to_dict(previous+' '+t)
-                if not twoback == '':
-                    add_to_dict(twoback+' '+previous+' '+t)
-                    
-                twoback = previous
-                previous = t
-            dataset[filename].append(tempdict)
-with open('Words/alltest.json','w') as output:
-    # Dump it out so I don't have to request these files multiple times while debugging
-    json.dump(dataset,output)
+
+def it_over(inputdir,outputdir):
+    count = 0
+    basedir = ''
+    for dir,_,files in os.walk(inputdir):
+        dataset = {}
+        if not basedir:
+            basedir = dir # only a folder depth of 1
+        for filename in files:
+            dataset[filename] = process_file(dir,filename)
+            count = count + 1
+            if count%100 == 0:
+                print str(count)+' files processed so far'
+        if len(dataset) > 0:
+            fname = re.sub(dir,'',basedir)+'.json'
+            with open('Words/'+fname,'w') as output:
+                # Dump it out so I don't have to reprocess these files multiple times while debugging
+                print 'Dumping '+str(count)+' files to '+filename
+                json.dump(dataset,output)
+    print str(count)+' files processed total!'
+
+
+if not options.searchterm:
+    # Iterate over all downloaded jobs
+    outputdir = 'Words/all.json'
+    inputdir = 'raw_pages/'
+    print 'Analyzing all downloaded pages!'
+    it_over(inputdir,outputdir)
+else:
+    print 'Analyzing '+options.searchterm+' pages'
+
+    outputdir = 'Words/'+options.searchterm+'.json'
+    inputdir = 'raw_pages/'+options.searchterm+'/'
+    if not os.path.exists(inputdir):
+        raise ValueError()
+    it_over(inputdir,outputdir)

@@ -1,27 +1,46 @@
 import json
 import numpy
-from os import walk
 from collections import Counter
 
 words_to_keep = 1000
-num_clust = 16
+num_clust = 7
+
+import os
+from optparse import OptionParser
+parser = OptionParser()
+parser.add_option('-s','--search',dest="searchterm",help="The job descriptions to download from indeed.com",metavar="SEARCH")
+
+(options,args) = parser.parse_args()
+
+if options.searchterm:
+    print 'Clustering '+options.searchterm+' pages'
+    inputfile = 'Words/'+options.searchterm+'.json'
+    scrapedpath = 'Scraped/'+options.searchterm+'/'
+else:
+    print 'Clustering all!'
+    scrapedpath = 'Scraped/'
+    inputfile = 'Words/all.json'
 
 all_parameters = {} # A dictionary of dictionaries
-with open('Scraped/all.json','rb') as jsonfile:
-    entries = json.load(jsonfile)
+entries = []
+for curpath,_,files in os.walk(scrapedpath):
+    if 'all.json' in files:
+        with open(curpath+'/all.json','rb') as jsonfile:
+            what = json.load(jsonfile)
+            print len(what),type(what)
+            entries.extend(what)
     
-with open('Words/alltest.json','rb') as jsonfile:
+with open(inputfile,'rb') as jsonfile:
     words = json.load(jsonfile)
     
 for entry in entries:
-    if 'latitude' in entry and 'longitude' in entry and (entry['jobkey'] in words) and (not entry['jobkey'] in all_parameters):
+    if 'latitude' in entry and 'longitude' in entry and (entry['jobkey'] in words) and words[entry['jobkey']] and (not entry['jobkey'] in all_parameters):
         all_parameters[entry['jobkey']] = {'latitude':entry['latitude'],'longitude':entry['longitude'],'words':words[entry['jobkey']]}
 
 all_words = Counter()
 for jk in all_parameters:
-    for word in all_parameters[jk]['words']:
-        for a,b in word.iteritems():
-            all_words.update({a:b})
+    for a,b in all_parameters[jk]['words'].iteritems():
+        all_words.update({a:b})
 top = {}
 keys = {}
 count = 0
@@ -34,15 +53,15 @@ matrix = numpy.zeros((len(all_parameters),words_to_keep),dtype=numpy.float32)
 entry_counter = 0
 data_order = []
 for jk in all_parameters:
-    for word in all_parameters[jk]['words']:
-        for a,b in word.iteritems():
-            if a in top:
-                matrix[entry_counter][top[a]] = b
+    for a,b in all_parameters[jk]['words'].iteritems():
+        if a in top:
+            matrix[entry_counter][top[a]] = b
     data_order = data_order + [jk]
     entry_counter += 1
 # Mean normalize for frequency in the corpus
 words_per_entry = matrix.sum(axis=1)
 matrix = matrix/words_per_entry[:,None]
+
 word_frequency = matrix.sum(axis=0)
 matrix = matrix/word_frequency
 
@@ -65,15 +84,15 @@ for k in [num_clust]:
     inertia = 0
     for n in range(1,10):
         k_means = KMeans(n_clusters=k).fit(matrix)
-        if (k_means.inertia_ < inertias[k]) or (inertias[k] == 0):
+        if (k_means.inertia_ < inertia) or (inertia == 0):
             inertia = k_means.inertia_
             labels = k_means.labels_
             centroids = k_means.cluster_centers_
 #print inertia
 
 from matplotlib import pyplot as mpl
-mpl.plot([x for x,inertia in inertias.iteritems()],[inertia for x,inertia in inertias.iteritems()],'.')
-mpl.show()
+#mpl.plot([x for x,inertia in inertias.iteritems()],[inertia for x,inertia in inertias.iteritems()],'.')
+#mpl.show()
 
 #print matrix.dtype
 def doPCA(data):
@@ -127,7 +146,7 @@ with open('clipped.png','rb') as map:
     img=imread(map)
     mpl.imshow(img[:,:,2],zorder=0,extent=[-125,-66,25,52],cmap='binary')
 for i,v in enumerate(labels):
-    dist = random()/2
+    dist = random()/16 # fuzz size
     angle = random()*6.28
     mpl.plot(all_parameters[data_order[i]]['longitude']+(dist*math.cos(angle)),all_parameters[data_order[i]]['latitude']+(dist*math.sin(angle)),'.',markeredgecolor=colors[v],markersize=1)
     

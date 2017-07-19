@@ -1,13 +1,27 @@
 import unirest
 import json
 from time import sleep
+import os
+from optparse import OptionParser
+
+parser = OptionParser()
+parser.add_option('-s','--search',dest="searchterm",help="The term to search indeed.com for",metavar="SEARCH")
+
+(options,args) = parser.parse_args()
+
+
+print 'Searching for '+options.searchterm
+
+outputdir = 'Scraped/'+options.searchterm
+if not os.path.exists(outputdir):
+    os.mkdir(outputdir)
 
 with open('userkey.txt','rb') as keyfile:
     userkey = keyfile.read(15) # 15 byte key assigned when you join the indeed ad API
 
 def make_query_string(city,start=1):
     # 25 is the max limit they allow
-    return 'http://api.indeed.com/ads/apisearch?publisher='+userkey+'&q="Data Scientist"&l='+city+'&sort=&radius=100&st=&jt=&start='+str(start)+'&limit=25&fromage=&filter=&latlong=1&co=us&chnl=&userip=1.2.3.4&useragent=Mozilla/%2F4.0%28Firefox%29&v=2&format=json'
+    return 'http://api.indeed.com/ads/apisearch?publisher='+userkey+'&q="'+options.searchterm+'"&l='+city+'&sort=&radius=100&st=&jt=&start='+str(start)+'&limit=25&fromage=&filter=&latlong=1&co=us&chnl=&userip=1.2.3.4&useragent=Mozilla/%2F4.0%28Firefox%29&v=2&format=json'
 all = []
 city_list = [   'washington%2C dc',
                 'seattle%2C wa',
@@ -54,12 +68,14 @@ for city in city_list:
         else:
             break
     if city != '':
-        with open('Scraped/'+city+'.json','w') as output:
+        with open(outputdir+'/'+city+'.json','w') as output:
             json.dump(results,output)
+        print city+' done!'
     else:
-        with open('Scraped/National.json','w') as output:
+        with open(outputdir+'/National.json','w') as output:
             json.dump(results,output)
+        print 'National done!'
     all = all + results
-print 'done!'
-with open('Scraped/all.json','w') as output:
+with open(outputdir+'/all.json','w') as output:
     json.dump(all,output)
+print 'All done!'
